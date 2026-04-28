@@ -1,8 +1,10 @@
 import os
 import smtplib
+import requests
 from email.mime.text import MIMEText
 from flask import Flask, jsonify, request
 from mssql_python import connect
+
 
 app = Flask(__name__)
 
@@ -138,36 +140,30 @@ def listar_productos():
             conn.close()
 
 
+
+
 def enviar_correo_alerta(asunto, mensaje, destino):
-    email_user = os.getenv("EMAIL_USER") or os.getenv("SMTP_USER")
-    email_password = os.getenv("EMAIL_PASSWORD") or os.getenv("SMTP_PASS")
+    api_key = os.getenv("RESEND_API_KEY")
 
-    if not email_user:
-        raise ValueError("Falta EMAIL_USER en Render")
-    if not email_password:
-        raise ValueError("Falta EMAIL_PASSWORD en Render")
+    if not api_key:
+        raise ValueError("Falta RESEND_API_KEY")
 
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    response = requests.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "from": "onboarding@resend.dev",
+            "to": destino,
+            "subject": asunto,
+            "html": f"<p>{mensaje}</p>"
+        }
+    )
 
-    msg = MIMEText(mensaje, "plain", "utf-8")
-    msg["Subject"] = asunto
-    msg["From"] = email_user
-    msg["To"] = destino
-
-    servidor = None
-
-    try:
-        servidor = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
-        servidor.ehlo()
-        servidor.starttls()
-        servidor.ehlo()
-        servidor.login(email_user, email_password)
-        servidor.sendmail(email_user, [destino], msg.as_string())
-
-    finally:
-        if servidor:
-            servidor.quit()
+    if response.status_code not in [200, 201]:
+        raise Exception(response.text)
 
 
 @app.route("/enviar-alerta", methods=["POST", "OPTIONS"])
