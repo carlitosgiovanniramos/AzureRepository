@@ -1,10 +1,12 @@
 import os
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from mssql_python import connect
 
 app = Flask(__name__)
 
-
+# =========================
+# CONEXIÓN A BASE DE DATOS
+# =========================
 def get_connection():
     server = os.getenv("DB_SERVER")
     database = os.getenv("DB_DATABASE")
@@ -34,6 +36,9 @@ def get_connection():
     return connect(connection_string)
 
 
+# =========================
+# RUTAS BÁSICAS
+# =========================
 @app.route("/")
 def home():
     return jsonify({
@@ -81,6 +86,9 @@ def test_db():
             conn.close()
 
 
+# =========================
+# PRODUCTOS
+# =========================
 @app.route("/productos")
 def listar_productos():
     conn = None
@@ -123,6 +131,48 @@ def listar_productos():
             conn.close()
 
 
+# =========================
+# ENVÍO DE CORREO (PRUEBA)
+# =========================
+def enviar_correo_alerta(asunto, mensaje, destino):
+    print("=== ENVÍO SIMULADO ===")
+    print("Destino:", destino)
+    print("Asunto:", asunto)
+    print("Mensaje:", mensaje)
+
+
+@app.route("/enviar-alerta", methods=["POST"])
+def enviar_alerta():
+    try:
+        data = request.get_json()
+
+        destino = data.get("to")
+        asunto = data.get("subject")
+        mensaje = data.get("message")
+
+        if not destino or not asunto or not mensaje:
+            return jsonify({
+                "success": False,
+                "message": "Faltan datos"
+            }), 400
+
+        enviar_correo_alerta(asunto, mensaje, destino)
+
+        return jsonify({
+            "success": True,
+            "message": "Correo enviado correctamente"
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+# =========================
+# MAIN
+# =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
