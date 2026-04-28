@@ -134,11 +134,31 @@ def listar_productos():
 # =========================
 # ENVÍO DE CORREO (PRUEBA)
 # =========================
+import smtplib
+from email.mime.text import MIMEText
+
 def enviar_correo_alerta(asunto, mensaje, destino):
-    print("=== ENVÍO SIMULADO ===")
-    print("Destino:", destino)
-    print("Asunto:", asunto)
-    print("Mensaje:", mensaje)
+    email_user = os.getenv("EMAIL_USER")
+    email_password = os.getenv("EMAIL_PASSWORD")
+
+    msg = MIMEText(mensaje)
+    msg["Subject"] = asunto
+    msg["From"] = email_user
+    msg["To"] = destino
+
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(email_user, email_password)
+
+        server.sendmail(email_user, destino, msg.as_string())
+        server.quit()
+
+        print("Correo enviado correctamente")
+
+    except Exception as e:
+        print("Error enviando correo:", e)
+        raise e
 
 
 @app.route("/enviar-alerta", methods=["POST"])
