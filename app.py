@@ -1,12 +1,20 @@
 import os
+import smtplib
+from email.mime.text import MIMEText
 from flask import Flask, jsonify, request
 from mssql_python import connect
 
 app = Flask(__name__)
 
-# =========================
-# CONEXIÓN A BASE DE DATOS
-# =========================
+
+@app.after_request
+def agregar_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return response
+
+
 def get_connection():
     server = os.getenv("DB_SERVER")
     database = os.getenv("DB_DATABASE")
@@ -36,9 +44,6 @@ def get_connection():
     return connect(connection_string)
 
 
-# =========================
-# RUTAS BÁSICAS
-# =========================
 @app.route("/")
 def home():
     return jsonify({
@@ -55,6 +60,10 @@ def debug_env():
         "DB_USERNAME": os.getenv("DB_USERNAME"),
         "DB_PASSWORD_EXISTS": bool(os.getenv("DB_PASSWORD")),
         "DB_PORT": os.getenv("DB_PORT"),
+        "EMAIL_USER_EXISTS": bool(os.getenv("EMAIL_USER")),
+        "EMAIL_PASSWORD_EXISTS": bool(os.getenv("EMAIL_PASSWORD")),
+        "SMTP_HOST": os.getenv("SMTP_HOST", "smtp.gmail.com"),
+        "SMTP_PORT": os.getenv("SMTP_PORT", "587")
     })
 
 
@@ -86,9 +95,6 @@ def test_db():
             conn.close()
 
 
-# =========================
-# PRODUCTOS
-# =========================
 @app.route("/productos")
 def listar_productos():
     conn = None
@@ -118,6 +124,7 @@ def listar_productos():
             "success": True,
             "data": data
         })
+
     except Exception as e:
         return jsonify({
             "success": False,
@@ -131,40 +138,51 @@ def listar_productos():
             conn.close()
 
 
-# =========================
-# ENVÍO DE CORREO (PRUEBA)
-# =========================
-import smtplib
-from email.mime.text import MIMEText
-
 def enviar_correo_alerta(asunto, mensaje, destino):
-    email_user = os.getenv("EMAIL_USER")
-    email_password = os.getenv("EMAIL_PASSWORD")
+    email_user = os.getenv("EMAIL_USER") or os.getenv("SMTP_USER")
+    email_password = os.getenv("EMAIL_PASSWORD") or os.getenv("SMTP_PASS")
 
-    msg = MIMEText(mensaje)
+    if not email_user:
+        raise ValueError("Falta EMAIL_USER en Render")
+    if not email_password:
+        raise ValueError("Falta EMAIL_PASSWORD en Render")
+
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+
+    msg = MIMEText(mensaje, "plain", "utf-8")
     msg["Subject"] = asunto
     msg["From"] = email_user
     msg["To"] = destino
 
+    servidor = None
+
     try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(email_user, email_password)
+        servidor = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+        servidor.ehlo()
+        servidor.starttls()
+        servidor.ehlo()
+        servidor.login(email_user, email_password)
+        servidor.sendmail(email_user, [destino], msg.as_string())
 
-        server.sendmail(email_user, destino, msg.as_string())
-        server.quit()
-
-        print("Correo enviado correctamente")
-
-    except Exception as e:
-        print("Error enviando correo:", e)
-        raise e
+    finally:
+        if servidor:
+            servidor.quit()
 
 
-@app.route("/enviar-alerta", methods=["POST"])
+@app.route("/enviar-alerta", methods=["POST", "OPTIONS"])
 def enviar_alerta():
+    if request.method == "OPTIONS":
+        return jsonify({"success": True}), 200
+
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
+
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "No se recibió JSON válido"
+            }), 400
 
         destino = data.get("to")
         asunto = data.get("subject")
@@ -173,7 +191,7 @@ def enviar_alerta():
         if not destino or not asunto or not mensaje:
             return jsonify({
                 "success": False,
-                "message": "Faltan datos"
+                "message": "Faltan datos: to, subject o message"
             }), 400
 
         enviar_correo_alerta(asunto, mensaje, destino)
@@ -186,13 +204,11 @@ def enviar_alerta():
     except Exception as e:
         return jsonify({
             "success": False,
+            "message": "Error al enviar correo",
             "error": str(e)
         }), 500
 
 
-# =========================
-# MAIN
-# =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
